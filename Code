@@ -1,0 +1,81 @@
+import os
+import re
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, VideoUnavailable
+from google import genai
+
+def extract_video_id(url: str) -> str:
+    """
+    Extracts the 11-character YouTube video ID from various URL patterns.
+    """
+    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)/| Shorts/|[^/]*\?v=)|youtu\.be/)([^"&?/\s]{11})'
+    match = re.search(pattern, url)
+    if not match:
+        raise ValueError("Invalid YouTube URL format. Please check the link.")
+    return match.group(1)
+
+def get_youtube_transcript(video_id: str) -> str:
+    """
+    Fetches the raw text transcript of a YouTube video.
+    """
+    try:
+        # Fetch transcript pieces
+        transcript_pieces = YouTubeTranscriptApi.get_transcript(video_id)
+        
+        # Combine the text snippets into a single cohesive string
+        full_transcript = " ".join([item['text'] for item in transcript_pieces])
+        return full_transcript
+        
+    except TranscriptsDisabled:
+        raise RuntimeError("Subtitles/Transcripts are disabled or unavailable for this video.")
+    except VideoUnavailable:
+        raise RuntimeError("The requested video is unavailable or private.")
+    except Exception as e:
+        raise RuntimeError(f"An unexpected error occurred while fetching the transcript: {str(e)}")
+
+def generate_summary(transcript_text: str) -> str:
+    """
+    Uses the modern Google GenAI client to generate an structured summary.
+    """
+    # The client automatically picks up the GEMINI_API_KEY environment variable
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise ValueError("GEMINI_API_KEY environment variable is missing. Set it before running.")
+        
+    client = genai.Client()
+    
+    prompt = f"""
+    You are an expert content analyzer. Summarize the following YouTube video transcript.
+    Provide a concise high-level overview, followed by the core key takeaways formatted as bullet points.
+    
+    Transcript:
+    {transcript_text}
+    """
+    
+    # gemini-2.5-flash is fast, cost-effective, and handles long transcripts perfectly
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
+    
+    return response.text
+
+if __name__ == "__main__":
+    # Test URL - replace this with any video link you want to try
+    youtube_url = "https://youtube.com"
+    
+    print(f"🎬 Processing Video...")
+    try:
+        video_id = extract_video_id(youtube_url)
+        print(f"✅ Extracted Video ID: {video_id}")
+        
+        print("📝 Fetching transcript...")
+        transcript = get_youtube_transcript(video_id)
+        
+        print("🤖 Generating AI Summary...")
+        summary = generate_summary(transcript)
+        
+        print("\n" + "="*40 + " VIDEO SUMMARY " + "="*40)
+        print(summary)
+        print("="*95)
+        
+    except Exception as e:
+        print(f"\n❌ Error: {str(e)}")
